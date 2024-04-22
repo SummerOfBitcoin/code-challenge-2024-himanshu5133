@@ -18,7 +18,7 @@ const (
 	SignatureOperationLimit = 20000   // Signature operation limit
 	MinTransactionSize      = 100     // Minimum transaction size in bytes
 	MinTransactionFee       = 1000    // Minimum transaction fee
-	MempoolPath             = `C:\Users\himan\Desktop\SOB\code-challenge-2024-himanshu5133\mempool` //path of mempool folder
+	MempoolPath             = `mempool` //path of mempool folder
 )
 
 // Block represents a block containing transactions
