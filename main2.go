@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -18,7 +20,8 @@ const (
 	SignatureOperationLimit = 20000   // Signature operation limit
 	MinTransactionSize      = 100     // Minimum transaction size in bytes
 	MinTransactionFee       = 1000    // Minimum transaction fee
-	MempoolPath             = `mempool` //path of mempool folder
+	// MempoolPath             = `C:\Users\himan\Desktop\SOB\code-challenge-2024-himanshu5133\mempool` //path of mempool folder
+	MempoolPath           = "mempool"
 )
 
 // Block represents a block containing transactions
@@ -41,8 +44,8 @@ type BlockHeader struct {
 
 // Transaction represents a Bitcoin transaction
 type Transaction struct {
-	Version uint32 `json:"version"`
-	Locktime uint32 `json:"locktime"`
+	Version uint32   `json:"version"`
+	Locktime uint32  `json:"locktime"`
 	Vin     []TxInput `json:"vin"`
 	Vout    []TxOutput `json:"vout"`
 }
@@ -115,6 +118,13 @@ func SerializeBlockHeader(header BlockHeader) []byte {
 	return serializedHeader
 }
 
+// HashBlockHeader hashes the serialized block header twice using SHA256
+func HashBlockHeader(serializedHeader []byte) [32]byte {
+	hash := sha256.Sum256(serializedHeader)
+	hash = sha256.Sum256(hash[:])
+	return hash
+}
+
 // serializeUint32 serializes a uint32 value into a little-endian byte slice
 func serializeUint32(value uint32) []byte {
 	buf := make([]byte, 4)
@@ -123,33 +133,38 @@ func serializeUint32(value uint32) []byte {
 }
 
 // WriteBlockToOutputFile writes the block data to the output file
-func WriteBlockToOutputFile(block Block) error {
+func WriteBlockToOutputFile(block Block, hash [32]byte) error {
 	file, err := os.Create("output.txt")
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	// Serialize block header
-	serializedHeader := SerializeBlockHeader(block.Header)
-
-	// Write block size
-	if err := binary.Write(file, binary.LittleEndian, block.Size); err != nil {
+	// Write block header
+	blockHeaderBytes := SerializeBlockHeader(block.Header)
+	blockHeaderHash := sha256.Sum256(blockHeaderBytes)
+	blockHeaderHash = sha256.Sum256(blockHeaderHash[:])
+	if _, err := file.WriteString(hex.EncodeToString(blockHeaderHash[:]) + "\n"); err != nil {
 		return err
 	}
 
-	// Write serialized block header
-	if _, err := file.Write(serializedHeader); err != nil {
+	// Write serialized coinbase transaction
+	serializedCoinbaseTx, err := json.Marshal(block.Transactions[0])
+	if err != nil {
 		return err
 	}
-
-	// Write transaction counter
-	if err := binary.Write(file, binary.LittleEndian, block.TransactionCount); err != nil {
+	if _, err := file.Write(serializedCoinbaseTx); err != nil {
+		return err
+	}
+	if _, err := file.WriteString("\n"); err != nil {
 		return err
 	}
 
 	// Write transaction IDs
-	for _, tx := range block.Transactions {
+	for i, tx := range block.Transactions {
+		if i == 0 {
+			continue // Skip coinbase transaction
+		}
 		if _, err := file.WriteString(tx.Vin[0].Txid + "\n"); err != nil {
 			return err
 		}
@@ -176,26 +191,33 @@ func ValidateTransaction(tx Transaction) bool {
 
 // CreateCoinbaseTransaction creates a coinbase transaction
 func CreateCoinbaseTransaction() Transaction {
-	// Create coinbase transaction
 	coinbaseTx := Transaction{
-		Version: 1,
+		Version:  1,
 		Locktime: 0,
 		Vin: []TxInput{
 			{
-				Txid:       "0000000000000000000000000000000000000000000000000000000000000000",
+				Txid:       "",
 				Vout:       -1,
+				ScriptSig:  "",
+				Witness:    nil,
 				IsCoinbase: true,
 				Sequence:   0xFFFFFFFF,
-				ScriptSig:  "coinbase script",
+				PrevOut: Prevout{
+					ScriptPubKey:     "",
+					ScriptPubKeyASM:  "",
+					ScriptPubKeyType: "",
+					ScriptPubKeyAddr: "",
+					Value:            0,
+				},
 			},
 		},
 		Vout: []TxOutput{
 			{
-				ScriptPubKey:     "script pubkey",
-				ScriptPubKeyASM:  "script pubkey asm",
-				ScriptPubKeyType: "script pubkey type",
-				ScriptPubKeyAddr: "script pubkey address",
-				Value:            1000000, // Example value in satoshis
+				ScriptPubKey:     "",
+				ScriptPubKeyASM:  "",
+				ScriptPubKeyType: "",
+				ScriptPubKeyAddr: "",
+				Value:            0,
 			},
 		},
 	}
@@ -211,46 +233,52 @@ func main() {
 	}
 	fmt.Println("Number of transactions in mempool:", len(transactions))
 
+	// Validate each transaction and create a list of valid transactions
 	var validTransactions []Transaction
-
-	// Validate each transaction
 	for _, tx := range transactions {
-		if err := ValidateTransaction(tx); err == false {
-			fmt.Printf("Invalid transaction %s: %v\n", tx.Vin[0].Txid, err)
-			continue
+		if ValidateTransaction(tx) {
+			validTransactions = append(validTransactions, tx)
+		} else {
+			fmt.Printf("Invalid transaction %s\n", tx.Vin[0].Txid)
 		}
-		validTransactions = append(validTransactions, tx)
 	}
 	fmt.Println("Number of valid transactions:", len(validTransactions))
-	fmt.Println("Size of first valid transaction:", unsafe.Sizeof(validTransactions[0]))
 
-	// Add coinbase transaction as the first transaction
+	// Create a coinbase transaction
 	coinbaseTx := CreateCoinbaseTransaction()
-	validTransactions = append([]Transaction{coinbaseTx}, validTransactions...)
+
+	// Ensure that the coinbase transaction is the first transaction in the block
+	blockTransactions := append([]Transaction{coinbaseTx}, validTransactions...)
 
 	// Create a block
 	block := Block{
 		Size:             0, // Calculate block size later
 		Header:           BlockHeader{},
-		TransactionCount: uint64(len(validTransactions)),
-		Transactions:     validTransactions,
+		TransactionCount: uint64(len(blockTransactions)),
+		Transactions:     blockTransactions,
 	}
 
-	// Set block header fields
+	// Set block header fields (dummy values for demonstration)
 	block.Header.Version = 1
 	block.Header.Timestamp = uint32(time.Now().Unix())
 	block.Header.DifficultyTarget = "0000ffff00000000000000000000000000000000000000000000000000000000"
 	block.Header.Nonce = 0 // Dummy nonce
 
-	// Calculate block size
+	// Calculate block size (excluding block size field itself)
 	blockSize := uint64(len(SerializeBlockHeader(block.Header)) + 8) // 8 bytes for transaction counter
 	for _, tx := range block.Transactions {
 		blockSize += uint64(unsafe.Sizeof(tx)) // Add size of each transaction
 	}
 	block.Size = blockSize
 
+	// Serialize block header
+	serializedHeader := SerializeBlockHeader(block.Header)
+
+	// Hash the block header twice
+	blockHash := HashBlockHeader(serializedHeader)
+
 	// Write the block data to the output file
-	if err := WriteBlockToOutputFile(block); err != nil {
+	if err := WriteBlockToOutputFile(block, blockHash); err != nil {
 		fmt.Println("Error writing block to output file:", err)
 		return
 	}
